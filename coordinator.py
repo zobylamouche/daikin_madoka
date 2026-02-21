@@ -24,6 +24,9 @@ from .madoka_protocol import (
     CMD_GET_SETPOINT,
     CMD_GET_FAN,
     CMD_GET_TEMPERATURES,
+    CMD_GET_CLEAN_FILTER,
+    CMD_GET_VERSION,
+    CMD_GET_EYE_BRIGHTNESS,
     MadokaState,
     OperationMode,
     FanSpeed,
@@ -36,11 +39,19 @@ from .madoka_protocol import (
     cmd_set_mode,
     cmd_set_setpoint,
     cmd_set_fan,
+    cmd_get_clean_filter,
+    cmd_reset_filter,
+    cmd_get_version,
+    cmd_get_eye_brightness,
+    cmd_set_eye_brightness,
     decode_power,
     decode_mode,
     decode_setpoint,
     decode_fan,
     decode_temperatures,
+    decode_clean_filter,
+    decode_version,
+    decode_eye_brightness,
 )
 from .const import DOMAIN
 
@@ -141,6 +152,46 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
             except Exception as err:
                 _LOGGER.debug("Temperature read failed: %s", err)
 
+            await asyncio.sleep(_QUERY_PAUSE)
+
+            # 6. Clean filter indicator
+            try:
+                vals = await self._client.async_query(
+                    cmd_get_clean_filter(), CMD_GET_CLEAN_FILTER
+                )
+                self.state.clean_filter_needed = decode_clean_filter(vals)
+            except Exception as err:
+                _LOGGER.debug("Clean filter read failed: %s", err)
+
+            await asyncio.sleep(_QUERY_PAUSE)
+
+            # 7. Firmware version (only fetch once)
+            if self.state.firmware_rc is None:
+                try:
+                    vals = await self._client.async_query(
+                        cmd_get_version(), CMD_GET_VERSION
+                    )
+                    rc, ble = decode_version(vals)
+                    if rc is not None:
+                        self.state.firmware_rc = rc
+                    if ble is not None:
+                        self.state.firmware_ble = ble
+                except Exception as err:
+                    _LOGGER.debug("Version read failed: %s", err)
+
+                await asyncio.sleep(_QUERY_PAUSE)
+
+            # 8. Eye brightness
+            try:
+                vals = await self._client.async_query(
+                    cmd_get_eye_brightness(), CMD_GET_EYE_BRIGHTNESS
+                )
+                brightness = decode_eye_brightness(vals)
+                if brightness is not None:
+                    self.state.eye_brightness = brightness
+            except Exception as err:
+                _LOGGER.debug("Eye brightness read failed: %s", err)
+
             _LOGGER.debug(
                 "Poll complete: power=%s mode=%s cool=%.0f°C heat=%.0f°C indoor=%s outdoor=%s",
                 self.state.power_on,
@@ -186,4 +237,16 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
         await self._client.async_send_command(cmd_set_fan(cooling, heating))
         self.state.cooling_fan_speed = cooling
         self.state.heating_fan_speed = heating
+        self.async_set_updated_data(self.state)
+
+    async def async_reset_filter(self) -> None:
+        """Reset clean filter indicator."""
+        await self._client.async_send_command(cmd_reset_filter())
+        self.state.clean_filter_needed = False
+        self.async_set_updated_data(self.state)
+
+    async def async_set_eye_brightness(self, level: int) -> None:
+        """Set eye LED brightness (0-19)."""
+        await self._client.async_send_command(cmd_set_eye_brightness(level))
+        self.state.eye_brightness = level
         self.async_set_updated_data(self.state)

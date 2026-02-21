@@ -56,11 +56,17 @@ CMD_GET_SETPOINT = 0x0040
 CMD_GET_FAN = 0x0050
 CMD_GET_TEMPERATURES = 0x0110
 
+CMD_GET_CLEAN_FILTER = 0x0100
+CMD_GET_VERSION = 0x0130
+CMD_GET_EYE_BRIGHTNESS = 0x0302
+
 # Set commands (add 0x4000 to Get)
 CMD_SET_POWER = 0x4020
 CMD_SET_MODE = 0x4030
 CMD_SET_SETPOINT = 0x4040
 CMD_SET_FAN = 0x4050
+CMD_RESET_FILTER = 0x4220
+CMD_SET_EYE_BRIGHTNESS = 0x4302
 
 # TLV parameter IDs
 PARAM_POWER = 0x20
@@ -71,6 +77,12 @@ PARAM_FAN_COOLING = 0x20
 PARAM_FAN_HEATING = 0x21
 PARAM_TEMP_INDOOR = 0x40
 PARAM_TEMP_OUTDOOR = 0x41
+
+# Extended feature param IDs
+PARAM_CLEAN_FILTER = 0x62
+PARAM_VERSION_RC = 0x45
+PARAM_VERSION_BLE = 0x46
+PARAM_EYE_BRIGHTNESS = 0x33
 
 
 # ─── Data Classes ────────────────────────────────────────────
@@ -85,6 +97,11 @@ class MadokaState:
     heating_setpoint: Optional[float] = None
     cooling_fan_speed: Optional[FanSpeed] = None
     heating_fan_speed: Optional[FanSpeed] = None
+    # Extended features
+    clean_filter_needed: Optional[bool] = None
+    firmware_rc: Optional[str] = None
+    firmware_ble: Optional[str] = None
+    eye_brightness: Optional[int] = None
 
 
 # ─── Chunking ────────────────────────────────────────────────
@@ -252,6 +269,37 @@ def cmd_get_temperatures() -> list[bytes]:
     return build_chunked_command(CMD_GET_TEMPERATURES)
 
 
+# ─── Extended Command Builders ────────────────────────────────
+def cmd_get_clean_filter() -> list[bytes]:
+    return build_chunked_command(CMD_GET_CLEAN_FILTER)
+
+
+def cmd_reset_filter() -> list[bytes]:
+    """Disable clean filter indicator and reset timer."""
+    return build_chunked_command(CMD_RESET_FILTER, {
+        0x51: b"\x01",   # disable indicator
+        0xFE: b"\x01",   # reset timer
+    })
+
+
+def cmd_get_version() -> list[bytes]:
+    return build_chunked_command(CMD_GET_VERSION)
+
+
+def cmd_get_eye_brightness() -> list[bytes]:
+    return build_chunked_command(CMD_GET_EYE_BRIGHTNESS, {
+        PARAM_EYE_BRIGHTNESS: b"\x00",
+    })
+
+
+def cmd_set_eye_brightness(level: int) -> list[bytes]:
+    """Set eye LED brightness (0=off .. 19=max)."""
+    level = max(0, min(19, level))
+    return build_chunked_command(CMD_SET_EYE_BRIGHTNESS, {
+        PARAM_EYE_BRIGHTNESS: level.to_bytes(1, "big"),
+    })
+
+
 # ─── Response Decoders ────────────────────────────────────────
 def decode_power(values: Dict[int, bytes]) -> bool:
     """Decode power state response."""
@@ -310,3 +358,31 @@ def decode_temperatures(values: Dict[int, bytes]) -> tuple[Optional[float], Opti
         v = raw_o[0]
         outdoor = None if v == 0xFF else float(v)
     return indoor, outdoor
+
+
+# ─── Extended Response Decoders ───────────────────────────────
+def decode_clean_filter(values: Dict[int, bytes]) -> bool:
+    """Decode clean filter indicator. Returns True if filter needs cleaning."""
+    raw = values.get(PARAM_CLEAN_FILTER, b"\x00")
+    return (raw[0] & 0x01) == 1
+
+
+def decode_version(values: Dict[int, bytes]) -> tuple[Optional[str], Optional[str]]:
+    """Decode firmware version. Returns (rc_version, ble_version)."""
+    rc = None
+    ble = None
+    raw_rc = values.get(PARAM_VERSION_RC)
+    raw_ble = values.get(PARAM_VERSION_BLE)
+    if raw_rc and len(raw_rc) >= 3:
+        rc = f"{raw_rc[0]}.{raw_rc[1]}.{raw_rc[2]}"
+    if raw_ble and len(raw_ble) >= 2:
+        ble = f"{raw_ble[0]}.{raw_ble[1]}"
+    return rc, ble
+
+
+def decode_eye_brightness(values: Dict[int, bytes]) -> Optional[int]:
+    """Decode eye brightness level (0-19)."""
+    raw = values.get(PARAM_EYE_BRIGHTNESS)
+    if raw is None:
+        return None
+    return raw[0]

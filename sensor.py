@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -26,6 +29,7 @@ async def async_setup_entry(
     entities = [
         MadokaIndoorTempSensor(coordinator, entry),
         MadokaOutdoorTempSensor(coordinator, entry),
+        MadokaFirmwareSensor(coordinator),
     ]
     async_add_entities(entities)
 
@@ -87,4 +91,48 @@ class MadokaOutdoorTempSensor(_MadokaTempSensor):
     @property
     def native_value(self) -> float | None:
         return self.coordinator.state.outdoor_temperature
+
+
+# ── New diagnostic / maintenance sensors ─────────────────────────
+
+
+class _MadokaBaseSensor(CoordinatorEntity[MadokaCoordinator], SensorEntity):
+    """Minimal base for non‑temperature sensors."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: MadokaCoordinator,
+        suffix: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._address = coordinator.address
+        self._attr_unique_id = f"{self._address}_{suffix}"
+        self._attr_name = name
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._address)},
+            "name": f"Madoka {self._address}",
+            "manufacturer": "DAIKIN",
+            "model": "BRC1H",
+        }
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+
+class MadokaFirmwareSensor(_MadokaBaseSensor):
+    """Remote controller firmware version."""
+
+    _attr_icon = "mdi:chip"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: MadokaCoordinator) -> None:
+        super().__init__(coordinator, "firmware_rc", "Firmware Version")
+
+    @property
+    def native_value(self) -> str | None:
+        return self.coordinator.state.firmware_rc
 

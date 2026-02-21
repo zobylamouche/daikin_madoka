@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .coordinator import MadokaCoordinator
 
-PLATFORMS = ["climate", "sensor"]
+PLATFORMS = ["climate", "sensor", "binary_sensor", "button", "number"]
 
 _LOGGER = logging.getLogger(__name__)
 
