@@ -1,0 +1,25 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Questo termostato è già configurato",
+      "not_supported": "Dispositivo non supportato"
+    },
+    "error": {
+      "required": "Inserire un indirizzo MAC",
+      "invalid_mac": "Formato indirizzo MAC non valido. Esempio: AA:BB:CC:DD:EE:FF"
+    },
+    "step": {
+      "user": {
+        "title": "Daikin Madoka",
+        "description": "Inserire l'indirizzo MAC Bluetooth del termostato BRC1H.\nEsempio: {example}\n\n⚠️ Il termostato deve essere accoppiato in precedenza tramite bluetoothctl.",
+        "data": {
+          "address": "Indirizzo MAC Bluetooth"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Conferma Daikin Madoka",
+        "description": "Confermare l'aggiunta del termostato {name}"
+      }
+    }
+  }
+}

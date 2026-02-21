@@ -1,0 +1,25 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Ce thermostat est déjà configuré",
+      "not_supported": "Appareil non pris en charge"
+    },
+    "error": {
+      "required": "Veuillez saisir une adresse MAC",
+      "invalid_mac": "Format d'adresse MAC invalide. Exemple : AA:BB:CC:DD:EE:FF"
+    },
+    "step": {
+      "user": {
+        "title": "Daikin Madoka",
+        "description": "Saisissez l'adresse MAC Bluetooth de votre thermostat BRC1H.\nExemple : {example}\n\n⚠️ Le thermostat doit être appairé au préalable via bluetoothctl.",
+        "data": {
+          "address": "Adresse MAC Bluetooth"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Confirmer Daikin Madoka",
+        "description": "Confirmer l'ajout du thermostat {name}"
+      }
+    }
+  }
+}
