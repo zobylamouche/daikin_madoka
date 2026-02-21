@@ -10,14 +10,14 @@
     },
     "step": {
       "user": {
-        "title": "Daikin Test",
+        "title": "Daikin Madoka",
         "description": "Saisissez l'adresse MAC Bluetooth de votre thermostat BRC1H.\nExemple : {example}\n\n⚠️ Le thermostat doit être appairé au préalable via bluetoothctl.",
         "data": {
           "address": "Adresse MAC Bluetooth"
         }
       },
       "bluetooth_confirm": {
-        "title": "Confirmer Daikin Test",
+        "title": "Confirmer Daikin Madoka",
         "description": "Confirmer l'ajout du thermostat {name}"
       }
     }

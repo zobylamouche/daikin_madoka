@@ -1,6 +1,6 @@
 {
   "domain": "daikin_test",
-  "name": "Daikin Test",
+  "name": "Daikin Madoka",
   "config_flow": true,
   "documentation": "https://github.com/zobylamouche/daikin_madoka",
   "dependencies": ["bluetooth"],

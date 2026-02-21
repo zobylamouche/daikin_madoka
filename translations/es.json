@@ -10,14 +10,14 @@
     },
     "step": {
       "user": {
-        "title": "Daikin Test",
+        "title": "Daikin Madoka",
         "description": "Introduzca la dirección MAC Bluetooth de su termostato BRC1H.\nEjemplo: {example}\n\n⚠️ El termostato debe estar emparejado previamente via bluetoothctl.",
         "data": {
           "address": "Dirección MAC Bluetooth"
         }
       },
       "bluetooth_confirm": {
-        "title": "Confirmar Daikin Test",
+        "title": "Confirmar Daikin Madoka",
         "description": "Confirmar agregar termostato {name}"
       }
     }
