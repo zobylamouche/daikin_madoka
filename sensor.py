@@ -1,106 +1,90 @@
-"""Support for Daikin AC sensors."""
-from homeassistant.const import (
-    CONF_TYPE,
-    CONF_UNIT_OF_MEASUREMENT,
-    UnitOfTemperature
-)
+"""Sensor platform for Daikin Madoka."""
+from __future__ import annotations
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass
-)
+import logging
 
-from homeassistant.helpers.entity import Entity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTemperature
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN
-from .const import (
-    SENSOR_TYPE_TEMPERATURE,
-    CONTROLLERS,
-)
+from .const import DOMAIN
+from .coordinator import MadokaCoordinator
 
-from pymadoka import Controller
-from pymadoka.feature import ConnectionException, ConnectionStatus
+_LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Old way of setting up the Daikin sensors.
-
-    Can only be called when a user accidentally mentions the platform in their
-    config. But even in that case it would have been ignored.
-    """
-
-
-async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up Daikin climate based on config_entry."""
-    ent = []
-    for controller in hass.data[DOMAIN][CONTROLLERS].values():
-        ent.append(MadokaSensor(controller))
-    async_add_entities(ent)
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Daikin sensors from a config entry."""
+    coordinator: MadokaCoordinator = hass.data[DOMAIN][entry.entry_id]
+    entities = [
+        MadokaIndoorTempSensor(coordinator, entry),
+        MadokaOutdoorTempSensor(coordinator, entry),
+    ]
+    async_add_entities(entities)
 
 
-class MadokaSensor(Entity):
-    """Representation of a Sensor."""
+class _MadokaTempSensor(CoordinatorEntity[MadokaCoordinator], SensorEntity):
+    """Base temperature sensor."""
 
-    def __init__(self, controller: Controller) -> None:
-        """Initialize the sensor."""
-        self.controller = controller
-        self._sensor = {
-            CONF_TYPE: SENSOR_TYPE_TEMPERATURE,
-            CONF_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS,
+    _attr_icon = "mdi:thermometer"
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(
+        self,
+        coordinator: MadokaCoordinator,
+        entry: ConfigEntry,
+        suffix: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._address = coordinator.address
+        self._attr_unique_id = f"{self._address}_{suffix}"
+        self._attr_name = name
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._address)},
+            "name": f"Madoka {self._address}",
+            "manufacturer": "DAIKIN",
+            "model": "BRC1H",
         }
- 
-    @property   
-    def available(self):
-        """Return the availability."""
-        return self.controller.connection.connection_status is ConnectionStatus.CONNECTED
 
     @property
-    def unique_id(self):
-        """Return a unique ID."""
-        return self.controller.connection.address
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+
+class MadokaIndoorTempSensor(_MadokaTempSensor):
+    """Indoor temperature sensor."""
+
+    def __init__(
+        self, coordinator: MadokaCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, entry, "indoor_temp", "Indoor Temperature")
 
     @property
-    def name(self):
-        """Return the name of the thermostat, if any."""
-        return self.controller.connection.name if self.controller.connection.name is not None else self.controller.connection.address
+    def native_value(self) -> float | None:
+        return self.coordinator.state.indoor_temperature
 
 
-    @property
-    def state(self):
-        """Return the internal state of the sensor."""
-        if self.controller.temperatures.status is None:
-            return None
-        return self.controller.temperatures.status.indoor
+class MadokaOutdoorTempSensor(_MadokaTempSensor):
+    """Outdoor temperature sensor."""
 
-    @property
-    def device_class(self):
-        """Return the class of this device."""
-        return SensorDeviceClass.TEMPERATURE
+    _attr_icon = "mdi:thermometer-lines"
+
+    def __init__(
+        self, coordinator: MadokaCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, entry, "outdoor_temp", "Outdoor Temperature")
 
     @property
-    def icon(self):
-        """Return the icon of this device."""
-        return None
+    def native_value(self) -> float | None:
+        return self.coordinator.state.outdoor_temperature
 
-    @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement."""
-        return UnitOfTemperature.CELSIUS
-
-    async def async_update(self):
-        """Retrieve latest state."""
-        try:
-            await self.controller.temperatures.query()
-        except ConnectionAbortedError:
-            pass
-        except ConnectionException:
-            pass
-
-    @property
-    async def async_device_info(self):
-        """Return a device description for device registry."""
-        try:
-            return await self.controller.read_info()
-        except ConnectionAbortedError:
-            pass
-        except ConnectionException:
-            pass

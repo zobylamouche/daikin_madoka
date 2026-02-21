@@ -1,100 +1,76 @@
-"""Platform for the Daikin AC."""
-import asyncio
-from datetime import timedelta
+"""Platform for the Daikin Test AC (Madoka BRC1H via BLE)."""
+from __future__ import annotations
+
 import logging
 
-from pymadoka import Controller, discover_devices, force_device_disconnect
-import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CONF_DEVICE,
-    CONF_DEVICES,
-    CONF_FORCE_UPDATE,
-    CONF_SCAN_INTERVAL,
-)
-import homeassistant.helpers.config_validation as cv
 from homeassistant.core import HomeAssistant
 
-from . import config_flow  # noqa: F401
-from .const import CONTROLLERS, DOMAIN
+from .const import DOMAIN
+from .coordinator import MadokaCoordinator
 
-PARALLEL_UPDATES = 0
-MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
-
-COMPONENT_TYPES = ["climate"]
+PLATFORMS = ["climate", "sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_SCHEMA = vol.Schema(
-    vol.All(
-        cv.deprecated(DOMAIN),
-        {
-            DOMAIN: vol.Schema(
-                {
-                    vol.Required(CONF_DEVICES, default=[]): vol.All(
-                        cv.ensure_list, [cv.string]
-                    ),
-                    vol.Optional(CONF_FORCE_UPDATE, default=True): bool,
-                    vol.Optional(CONF_DEVICE, default="hci0"): cv.string,
-                    vol.Optional(CONF_SCAN_INTERVAL, default=5): cv.positive_int,
-                }
-            )
-        },
-    ),
-    extra=vol.ALLOW_EXTRA,
-)
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entry to new format."""
+    if entry.version == 1 and "address" not in entry.data:
+        _LOGGER.info("Migrating config entry %s from v1 (old format)", entry.entry_id)
+        old_data = dict(entry.data)
+        # Old format: {"devices": ["AA:BB:..."], "device": "hci0"}
+        devices = old_data.get("devices", [])
+        if isinstance(devices, list) and devices:
+            address = devices[0].upper()
+        elif isinstance(devices, str):
+            address = devices.upper()
+        else:
+            _LOGGER.error("Cannot migrate: no MAC address found in old config")
+            return False
 
-async def async_setup(hass, config):
-    """Set up the component."""
-
-    hass.data.setdefault(DOMAIN, {})
-
+        hass.config_entries.async_update_entry(
+            entry, data={"address": address}, version=1
+        )
+        _LOGGER.info("✅ Migrated config entry to new format: address=%s", address)
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Pass conf to all the components."""
-
-    controllers = {}
-    for device in entry.data[CONF_DEVICES]:
-        if entry.data[CONF_FORCE_UPDATE]:
-            await force_device_disconnect(device)
-        controllers[device] = Controller(device, adapter=entry.data[CONF_DEVICE])
-
-    await discover_devices(
-        adapter=entry.data[CONF_DEVICE], timeout=entry.data[CONF_SCAN_INTERVAL]
-    )
-
-    for device, controller in controllers.items():
-        try:
-            await asyncio.wait_for(controller.start(), timeout=10)
-        except ConnectionAbortedError as connection_aborted_error:
-            _LOGGER.error(
-                "Could not connect to device %s: %s",
-                device,
-                str(connection_aborted_error),
-            )
-
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the component (YAML not supported)."""
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {CONTROLLERS: controllers}
-    for component in COMPONENT_TYPES:
-        coroutine = hass.config_entries.async_forward_entry_setups(entry, [component])
-        hass.async_create_task(coroutine)
-
-
     return True
 
 
-async def async_unload_entry(hass, config_entry):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Daikin Madoka from a config entry."""
+    address: str = entry.data["address"]
+
+    coordinator = MadokaCoordinator(hass, address)
+
+    try:
+        await coordinator.async_start()
+        _LOGGER.info("✅ BLE started for Madoka %s", address)
+    except Exception as err:
+        _LOGGER.error("❌ Failed to start BLE for %s: %s", address, err)
+        raise
+
+    # First data refresh
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    await asyncio.wait(
-        [
-            hass.async_create_task(hass.config_entries.async_forward_entry_unload(config_entry, component))
-            for component in COMPONENT_TYPES
-        ]
-    )
-    hass.data[DOMAIN].pop(config_entry.entry_id)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        coordinator: MadokaCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_stop()
+    return unload_ok
 
-    return True
+
