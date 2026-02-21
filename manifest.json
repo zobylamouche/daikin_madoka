@@ -1,5 +1,5 @@
 {
-  "domain": "daikin_test",
+  "domain": "daikin_madoka",
   "name": "Daikin Madoka",
   "config_flow": true,
   "documentation": "https://github.com/zobylamouche/daikin_madoka",
