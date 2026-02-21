@@ -1,8 +1,25 @@
 """
 coordinator.py — DataUpdateCoordinator for Daikin Madoka BRC1H.
 
-Polls all device features periodically and exposes a MadokaState.
-Provides methods to send set-commands to the device.
+This is the central data manager for the integration.  It:
+1.  Owns the MadokaBluetoothClient (BLE connection layer).
+2.  Polls the thermostat every 60 seconds, querying each feature
+    in sequence with a short pause between queries to avoid
+    overwhelming the BLE link.
+3.  Stores the current state in a MadokaState dataclass.
+4.  Exposes async_set_* methods that send write commands to the
+    device and immediately update the local state so the UI
+    reflects changes without waiting for the next poll.
+
+Query order per poll cycle:
+  1. Power state           (CMD 0x0020)
+  2. Operation mode        (CMD 0x0030)
+  3. Setpoints (cool/heat) (CMD 0x0040)
+  4. Fan speeds            (CMD 0x0050)
+  5. Temperatures (in/out) (CMD 0x0110)
+  6. Clean filter flag     (CMD 0x0100)
+  7. Firmware version      (CMD 0x0130) — only fetched once
+  8. Eye LED brightness    (CMD 0x0302)
 """
 from __future__ import annotations
 
@@ -57,8 +74,8 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-_UPDATE_INTERVAL = timedelta(seconds=60)
-_QUERY_PAUSE = 0.5  # seconds between sequential queries
+_UPDATE_INTERVAL = timedelta(seconds=60)  # Polling interval for BLE queries
+_QUERY_PAUSE = 0.5  # Seconds between sequential BLE queries to avoid congestion
 
 
 class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
@@ -85,7 +102,13 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
 
     # ─── Polling ─────────────────────────────────────────────────
     async def _async_update_data(self) -> MadokaState:
-        """Poll all features from the device."""
+        """Poll all features from the device.
+
+        Each query is wrapped in its own try/except so that a failure
+        in one feature (e.g. firmware version) does not prevent the
+        others from being updated.  A short pause between queries
+        gives the BLE stack time to process each response.
+        """
         try:
             # 1. Power
             try:
@@ -207,6 +230,11 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
             raise UpdateFailed(f"Failed to poll Madoka: {err}") from err
 
     # ─── Write Commands ──────────────────────────────────────────
+    # All write methods follow the same pattern:
+    #   1. Send the BLE command via the client.
+    #   2. Optimistically update the local state.
+    #   3. Notify HA listeners via async_set_updated_data().
+
     async def async_set_power(self, turn_on: bool) -> None:
         """Turn the unit on or off."""
         await self._client.async_send_command(cmd_set_power(turn_on))

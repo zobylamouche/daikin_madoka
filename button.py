@@ -1,4 +1,12 @@
-"""Button platform for Daikin Madoka — Reset clean filter indicator."""
+"""Button platform for Daikin Madoka — Reset clean filter indicator.
+
+Provides a ButtonEntity that, when pressed, sends CMD 0x4220 to the
+thermostat to:
+  - Disable the clean-filter indicator LED
+  - Reset the internal filter usage timer
+
+This should be pressed after physically cleaning the air filter.
+"""
 from __future__ import annotations
 
 import logging
@@ -28,7 +36,11 @@ async def async_setup_entry(
 class MadokaResetFilterButton(
     CoordinatorEntity[MadokaCoordinator], ButtonEntity
 ):
-    """Button to reset the clean filter indicator and timer."""
+    """Button to reset the clean filter indicator and usage timer.
+
+    After cleaning the physical filter, press this button to clear
+    the warning and restart the filter timer on the thermostat.
+    """
 
     _attr_icon = "mdi:air-filter"
     _attr_has_entity_name = True

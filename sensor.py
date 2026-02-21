@@ -1,4 +1,13 @@
-"""Sensor platform for Daikin Madoka."""
+"""Sensor platform for Daikin Madoka BRC1H.
+
+Exposes the following sensor entities:
+- Indoor temperature  (°C, from the built-in room sensor)
+- Outdoor temperature  (°C, from the outdoor unit, may be unavailable)
+- Firmware version    (diagnostic, fetched once at startup)
+
+All sensors are CoordinatorEntity instances bound to MadokaCoordinator,
+so they update automatically on each polling cycle.
+"""
 from __future__ import annotations
 
 import logging
@@ -35,7 +44,11 @@ async def async_setup_entry(
 
 
 class _MadokaTempSensor(CoordinatorEntity[MadokaCoordinator], SensorEntity):
-    """Base temperature sensor."""
+    """Base class for temperature sensors (indoor / outdoor).
+
+    Provides common attributes: icon, device_class, unit, device_info.
+    Subclasses only need to implement native_value.
+    """
 
     _attr_icon = "mdi:thermometer"
     _attr_has_entity_name = True
@@ -93,11 +106,15 @@ class MadokaOutdoorTempSensor(_MadokaTempSensor):
         return self.coordinator.state.outdoor_temperature
 
 
-# ── New diagnostic / maintenance sensors ─────────────────────────
+# ── Diagnostic / maintenance sensors ─────────────────────────────
 
 
 class _MadokaBaseSensor(CoordinatorEntity[MadokaCoordinator], SensorEntity):
-    """Minimal base for non‑temperature sensors."""
+    """Base class for non-temperature sensors (firmware, etc.).
+
+    Similar to _MadokaTempSensor but without temperature-specific
+    attributes (device_class, unit).
+    """
 
     _attr_has_entity_name = True
 
@@ -124,7 +141,11 @@ class _MadokaBaseSensor(CoordinatorEntity[MadokaCoordinator], SensorEntity):
 
 
 class MadokaFirmwareSensor(_MadokaBaseSensor):
-    """Remote controller firmware version."""
+    """Diagnostic sensor showing the remote controller firmware version.
+
+    The version is fetched once (CMD 0x0130) and cached in MadokaState.
+    Displayed as e.g. "1.2.3" in the HA entity.
+    """
 
     _attr_icon = "mdi:chip"
     _attr_entity_category = EntityCategory.DIAGNOSTIC

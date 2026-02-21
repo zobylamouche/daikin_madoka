@@ -1,72 +1,135 @@
-# Home Assistant Daikin Madoka
+# Daikin Madoka BRC1H — Home Assistant Integration
 
-This is a custom component developed to support Daikin Madoka BRC1H thermostats in Home Assistant. 
+Custom integration for controlling **Daikin Madoka BRC1H** thermostats via Bluetooth Low Energy (BLE) in [Home Assistant](https://www.home-assistant.io/).
 
-This custom component has been evolved to become part of the Home Assistant core integrations and is awaiting to be integrated.
+![Madoka thermostat](images/madoka.png)
 
-![](images/madoka.png)
+## Features
 
-![](images/integration.png)  ![](images/climate.png) ![](images/entities.png) 
+| Entity | Type | Description |
+|--------|------|-------------|
+| Climate | `climate` | Full HVAC control — heat, cool, auto, dry, fan-only, off |
+| Indoor Temperature | `sensor` | Current room temperature (°C) |
+| Outdoor Temperature | `sensor` | Outdoor unit temperature (°C, when available) |
+| Clean Filter | `binary_sensor` | Indicates when the air filter needs cleaning |
+| Reset Filter | `button` | Clears the filter warning and resets the timer |
+| Eye Brightness | `number` | Controls the front LED brightness (0–19) |
+| Firmware Version | `sensor` | Remote controller firmware (diagnostic) |
 
-## Installation
+![Integration](images/integration.png) ![Climate](images/climate.png) ![Entities](images/entities.png)
 
-Download folder and copy under "custom_components" folder in the Home Assistant configuration folder.
+## Architecture
+
+This integration communicates directly with the BRC1H over BLE using a **clean-room TLV protocol implementation** — no dependency on `pymadoka`.
+
+| Module | Role |
+|--------|------|
+| `madoka_protocol.py` | BLE GATT TLV protocol: command builders, chunk assembly, response decoders |
+| `bluetooth.py` | BLE connection management with auto-reconnect and backoff |
+| `coordinator.py` | HA `DataUpdateCoordinator` — polls the device and exposes `MadokaState` |
+| `climate.py` | `ClimateEntity` with HVAC modes, fan speeds, setpoints |
+| `sensor.py` | Temperature sensors + firmware version diagnostic |
+| `binary_sensor.py` | Clean filter indicator |
+| `button.py` | Reset filter button |
+| `number.py` | Eye LED brightness slider |
+| `config_flow.py` | Manual MAC entry + Bluetooth auto-discovery |
 
 ## Requirements
 
-Due to the thermostat security constraints, is has to be manually paired with the system where HomeAssistant runs. This has only been tested in Linux, but the following steps should be easy to follow:
+- **Home Assistant** 2024.1 or later
+- **Bluetooth adapter** accessible to HA (built-in or USB dongle)
+- The thermostat must be **paired** with the host system before adding the integration
 
-1. Disconnect the thermostat from any other device (thermostat Bluetooth menu, forget). This has to be done to make the device visible during the scanning.
-2. On a terminal, run "bluetoothctl"
-3. Type "agent KeyboardDisplay"
-4. Type "remove <BRC1H_MAC_ADDRESS>". This step helps to remove unsucessful previous pairings and makes the device visible.
-5. Type "scan on" and wait until the mac is listed.
-6. Type "scan off"
-7. Type "pair <BRC1H_MAC_ADDRESS>". You will be presented a confirmation prompt, accept it.
-8. Go to the thermostat and accept the pairing code. It requires to do it fairly soon after the previous step or it will be cancelled.
-9. The device is ready and you can start the integration in Home Assistant.
+### Pairing the thermostat
 
-A dedicated Bluetooth adapter is desirable. If you run Home Assistant in a virtual machine, it makes it easiser for the device to be used. In VMWare, make sure to remove the checkbox "Share bluetooth devices with guests". This way, the adapter will become visible to the virtual machine and will use it without problem. 
+1. On the thermostat, go to the Bluetooth menu and **forget** any existing connections.
+2. On the HA host, open a terminal and run:
+   ```bash
+   bluetoothctl
+   agent KeyboardDisplay
+   remove <MAC_ADDRESS>    # Remove any stale pairing
+   scan on                 # Wait until the MAC appears
+   scan off
+   pair <MAC_ADDRESS>      # Accept the pairing prompt on the thermostat
+   ```
+3. The device is now ready for the integration.
 
-## Usage
+> **Tip:** A dedicated Bluetooth adapter is recommended. If running HA in a VM, pass the USB adapter through to the guest.
 
-A new integration will be available under the name "Daikin Madoka". You have to provide the following details:
+## Installation
 
-- Bluetooth MAC Address of the BRC1H device(s)
-- Name of the Bluetooth adapter (usually hci0)
+### Manual
 
-The integration will scan for the devices and will create the thermostat and the temperature sensor.
+1. Download or clone this repository:
+   ```bash
+   cd /config/custom_components
+   git clone -b refactor-ble https://github.com/zobylamouche/daikin_madoka.git daikin_madoka
+   ```
+2. Restart Home Assistant.
+3. Go to **Settings → Devices & Services → Add Integration** and search for **Daikin Madoka**.
+4. Enter the Bluetooth MAC address of your BRC1H (e.g. `AA:BB:CC:DD:EE:FF`).
+
+### Updating
+
+```bash
+cd /config/custom_components/daikin_madoka
+git pull
+```
+Then restart Home Assistant.
+
+## Bluetooth auto-discovery
+
+The integration automatically detects BLE devices with names matching:
+- `UE878*` (common BRC1H radio module name)
+- `Madoka*`
+- `BRC*`
+- `Daikin*`
+
+When a matching device is found, HA will prompt you to confirm adding it.
+
 ## Troubleshooting
 
-* **The integration form shows an error "The device could not be found" next to the adapter field but "hcitool dev" lists the device" **
+### "BLE device not found"
 
-This could be a problem related to the configuration of the DBUS service. Make sure DBUS is installed in the host (it generally is) and that it is available to your homeassistant docker.
+- Ensure the thermostat is paired (`bluetoothctl info <MAC>` should show `Paired: yes`).
+- Check that the Bluetooth adapter is visible to HA (`bluetoothctl list`).
+- If running in Docker, mount the D-Bus socket:
+  ```yaml
+  volumes:
+    - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+  privileged: true
+  ```
 
-You can test it using *bleak* CLI tool *bleak-lescan* inside your instance. Follow these steps:
+### Intermittent disconnections
 
-```
-$ docker exec -ti <homeassistant_container_id> /bin/bash
-$ bleak-lescan -i <adapter>
-```
+BLE connections to the BRC1H can be unstable. The integration automatically reconnects with exponential backoff (1s → 2s → 5s → 10s → 15s). If disconnections persist:
+- Move the Bluetooth adapter closer to the thermostat.
+- Reduce interference from other 2.4 GHz devices.
+- Use a dedicated USB Bluetooth 5.0+ adapter.
 
-If the following error appears, DBUS is not available to the docker instance.
-```
-File "/usr/local/lib/python3.8/site-packages/bleak/backends/bluezdbus/scanner.py", line 90, in start
-    self._bus = await client.connect(self._reactor, "system").asFuture(loop)
-twisted.internet.error.ConnectError: An error occurred while connecting: Failed to connect to any bus address. Last error: An error occurred while connecting: 2: No such file or directory..
-“Failed to connect to any bus address”
-```
-To make DBus available you have to link /var/run/dbus/system_bus_socket inside the container and also run docker in privileged mode. 
+## Changelog
 
-Modify your docker-compose.yml:
-```
-volumes:
-  - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
-privileged: true
-```
+### v2.0.0 (2025–2026)
+- **Complete rewrite** — native HA BLE stack, no `pymadoka` dependency
+- Clean-room TLV protocol implementation in `madoka_protocol.py`
+- Auto-reconnect with exponential backoff
+- Bluetooth auto-discovery support
+- Config migration from v1.x format
+- New entities: clean filter indicator, reset filter button, eye brightness slider, firmware version
+- Translations: EN, ES, FR, IT, DE
 
-Kudos to [Jose](https://community.home-assistant.io/u/jcsogo) for the solution.
+### v1.1 (original)
+- Discovery improvements
+- Minor fixes
 
-## TODO
-This document.
-Icon and integration images.
+### v1.0 (original)
+- Initial release by Manuel Durán (pymadoka-based)
+
+## Credits
+
+- **Manuel Durán** ([@mduran80](https://github.com/mduran80)) — original integration and pymadoka library
+- **zobylamouche** ([@zobylamouche](https://github.com/zobylamouche)) — v2.0.0 rewrite with native HA BLE stack
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.

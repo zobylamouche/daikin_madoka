@@ -1,8 +1,21 @@
 """
 bluetooth.py — BLE client for Daikin Madoka using Home Assistant's native Bluetooth stack.
 
-Uses bleak_retry_connector for reliable GATT connections, and the HA bluetooth
-component for device discovery and advertisement callbacks.
+This module handles all low-level Bluetooth communication:
+- GATT connection management with automatic reconnection and backoff
+- Notification subscription on the Madoka NOTIFY characteristic
+- Chunked command writing to the WRITE characteristic
+- Response reassembly using ChunkAssembler from madoka_protocol.py
+- Pending-response tracking via asyncio.Future for query/response patterns
+
+Dependencies:
+- bleak_retry_connector: provides BleakClientWithServiceCache and
+  establish_connection() for reliable BLE connections.
+- homeassistant.components.bluetooth: provides device discovery,
+  advertisement callbacks, and BLE device lookup by MAC address.
+
+The client is designed to be long-lived: it starts once and automatically
+reconnects on disconnection using exponential backoff (1s, 2s, 5s, 10s, 15s).
 """
 from __future__ import annotations
 
@@ -37,10 +50,10 @@ from .madoka_protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_CONNECT_TIMEOUT_S = 20.0
-_WRITE_TIMEOUT_S = 10.0
-_RECONNECT_BACKOFF_S = (1.0, 2.0, 5.0, 10.0, 15.0)
-_SEND_MAX_TRIES = 3
+_CONNECT_TIMEOUT_S = 20.0           # Max time to wait for GATT connection
+_WRITE_TIMEOUT_S = 10.0             # Max time for a single GATT write
+_RECONNECT_BACKOFF_S = (1.0, 2.0, 5.0, 10.0, 15.0)  # Delays between retries
+_SEND_MAX_TRIES = 3                 # Max write attempts before giving up
 
 
 class MadokaBluetoothClient:

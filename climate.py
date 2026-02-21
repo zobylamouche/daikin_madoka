@@ -1,4 +1,20 @@
-"""Climate platform for Daikin Madoka."""
+"""Climate platform for Daikin Madoka BRC1H thermostat.
+
+Exposes the thermostat as a ClimateEntity with:
+- HVAC modes: OFF, AUTO, COOL, HEAT, DRY, FAN_ONLY
+- Fan modes: AUTO, LOW, MEDIUM, HIGH
+- Target temperature with 1°C step (16-32°C range)
+- Current indoor temperature reading
+
+The Madoka hardware maintains separate setpoints for cooling and heating.
+In HEAT mode the heating setpoint is used; in all other modes the cooling
+setpoint is displayed.  When changing temperature, both setpoints are
+updated simultaneously to keep them in sync.
+
+Important: the device ignores mode-change commands while powered off.
+Therefore async_set_hvac_mode() powers ON first, waits 1 second for the
+device to be ready, then sends the mode command.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +46,7 @@ from .madoka_protocol import FanSpeed, MadokaState, OperationMode
 _LOGGER = logging.getLogger(__name__)
 
 # ─── Mode mappings ────────────────────────────────────────────
+# Bidirectional mapping between HA HVAC modes and Madoka OperationMode enum.
 HA_MODE_TO_DAIKIN = {
     HVACMode.FAN_ONLY: OperationMode.FAN,
     HVACMode.DRY: OperationMode.DRY,
@@ -38,8 +55,10 @@ HA_MODE_TO_DAIKIN = {
     HVACMode.AUTO: OperationMode.AUTO,
 }
 
+# Reverse mapping: Madoka OperationMode -> HA HVACMode
 DAIKIN_TO_HA_MODE = {v: k for k, v in HA_MODE_TO_DAIKIN.items()}
 
+# Fan speed mapping: HA fan mode string <-> Madoka FanSpeed enum.
 HA_FAN_TO_DAIKIN = {
     FAN_AUTO: FanSpeed.AUTO,
     FAN_LOW: FanSpeed.LOW,
@@ -49,6 +68,8 @@ HA_FAN_TO_DAIKIN = {
 
 DAIKIN_TO_HA_FAN = {v: k for k, v in HA_FAN_TO_DAIKIN.items()}
 
+# Map Madoka operation mode to the corresponding HA HVAC action.
+# Used to show what the unit is actually doing (heating, cooling, etc.).
 DAIKIN_TO_HA_ACTION = {
     OperationMode.FAN: HVACAction.FAN,
     OperationMode.DRY: HVACAction.DRYING,
@@ -160,6 +181,12 @@ class DaikinMadokaClimate(CoordinatorEntity[MadokaCoordinator], ClimateEntity):
 
     # ─── Commands ────────────────────────────────────────────────
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set the HVAC mode.
+
+        When turning on, we must power on FIRST and wait ~1s before
+        sending the mode command. The BRC1H firmware ignores mode
+        changes while the unit is off.
+        """
         if hvac_mode == HVACMode.OFF:
             await self.coordinator.async_set_power(False)
         else:
@@ -172,6 +199,12 @@ class DaikinMadokaClimate(CoordinatorEntity[MadokaCoordinator], ClimateEntity):
                 await self.coordinator.async_set_mode(daikin_mode)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set new target temperature.
+
+        The Madoka maintains separate cooling and heating setpoints.
+        This method updates the relevant one based on the current
+        operation mode, and keeps the other in sync.
+        """
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
             return
@@ -196,6 +229,11 @@ class DaikinMadokaClimate(CoordinatorEntity[MadokaCoordinator], ClimateEntity):
         await self.coordinator.async_set_setpoint(cool, heat)
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set the fan speed.
+
+        The Madoka has separate cooling/heating fan speeds.
+        We set both to the same value for simplicity.
+        """
         daikin_fan = HA_FAN_TO_DAIKIN.get(fan_mode, FanSpeed.AUTO)
         await self.coordinator.async_set_fan(daikin_fan, daikin_fan)
 

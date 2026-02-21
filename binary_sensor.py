@@ -1,4 +1,9 @@
-"""Binary sensor platform for Daikin Madoka — Clean filter indicator."""
+"""Binary sensor platform for Daikin Madoka — Clean filter indicator.
+
+Exposes a BinarySensorEntity that is ON when the thermostat signals
+that the air filter needs cleaning (CMD 0x0100, param 0x62 bit 0).
+The indicator is reset via the companion button entity (button.py).
+"""
 from __future__ import annotations
 
 import logging
@@ -31,7 +36,11 @@ async def async_setup_entry(
 class MadokaCleanFilterSensor(
     CoordinatorEntity[MadokaCoordinator], BinarySensorEntity
 ):
-    """Binary sensor: True when filter needs cleaning."""
+    """Binary sensor: True when the air filter needs cleaning.
+
+    Uses BinarySensorDeviceClass.PROBLEM so HA displays it as a
+    warning when active.
+    """
 
     _attr_icon = "mdi:air-filter"
     _attr_has_entity_name = True

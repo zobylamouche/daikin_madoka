@@ -1,4 +1,13 @@
-"""Config flow for the Daikin Test integration."""
+"""Config flow for the Daikin Madoka integration.
+
+Supports two entry methods:
+1. Bluetooth auto-discovery: HA detects devices with names matching
+   UE878*, Madoka*, BRC*, Daikin* and shows a confirmation dialog.
+2. Manual entry: the user types the BLE MAC address of the thermostat.
+
+The MAC address is normalised to upper-case and used as the unique_id
+to prevent duplicate config entries.
+"""
 from __future__ import annotations
 
 import logging
@@ -14,20 +23,23 @@ from .const import DOMAIN, TITLE
 
 _LOGGER = logging.getLogger(__name__)
 
-# MAC address validation pattern
+# Regex for validating MAC addresses (colon or dash separated).
 _MAC_RE = re.compile(
     r"^[0-9a-fA-F]{2}([:-])[0-9a-fA-F]{2}(\1[0-9a-fA-F]{2}){4}$"
 )
 
-# Device names that indicate a Daikin Madoka
+# Known BLE advertisement name prefixes for Daikin Madoka devices.
+# Used during Bluetooth auto-discovery to identify compatible devices.
 _KNOWN_NAMES = ("madoka", "daikin", "brc", "ue878")
 
 
 def _valid_mac(mac: str) -> bool:
+    """Return True if the string is a well-formed MAC address."""
     return bool(_MAC_RE.match(mac.strip()))
 
 
 def _is_daikin_madoka(discovery_info: BluetoothServiceInfoBleak) -> bool:
+    """Check if a discovered BLE device is likely a Daikin Madoka."""
     name = (discovery_info.name or "").lower()
     return any(n in name for n in _KNOWN_NAMES)
 

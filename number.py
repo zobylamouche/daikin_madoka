@@ -1,4 +1,9 @@
-"""Number platform for Daikin Madoka — Eye LED brightness."""
+"""Number platform for Daikin Madoka — Eye LED brightness.
+
+Exposes a slider (0–19) to control the brightness of the status LED
+on the front of the BRC1H thermostat.  0 = LED off, 19 = maximum.
+The value is read via CMD 0x0302 and set via CMD 0x4302.
+"""
 from __future__ import annotations
 
 import logging
@@ -28,7 +33,12 @@ async def async_setup_entry(
 class MadokaEyeBrightness(
     CoordinatorEntity[MadokaCoordinator], NumberEntity
 ):
-    """Number entity to control the eye LED brightness (0-19)."""
+    """Number entity to control the eye LED brightness (0–19).
+
+    The BRC1H has a small status LED ("eye") on its front panel.
+    This entity lets the user dim or turn off that LED.
+    Presented as a slider in the HA frontend.
+    """
 
     _attr_icon = "mdi:brightness-6"
     _attr_has_entity_name = True
