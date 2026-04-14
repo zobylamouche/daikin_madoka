@@ -5,6 +5,7 @@ TITLE = "BRC1H"
 UNIQUE_ID = "BRC1H-id"
 
 CONTROLLERS = "controllers"
+VENTILATION_CONTROLLERS = "ventilation_controllers"
 
 ATTR_TARGET_TEMPERATURE = "target_temperature"
 ATTR_INSIDE_TEMPERATURE = "inside_temperature"

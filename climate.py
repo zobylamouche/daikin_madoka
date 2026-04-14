@@ -42,6 +42,7 @@ DAIKIN_TO_HA_MODE = {
     OperationModeEnum.COOL: HVACMode.COOL,
     OperationModeEnum.HEAT: HVACMode.HEAT,
     OperationModeEnum.AUTO: HVACMode.AUTO,
+    OperationModeEnum.VENTILATION: HVACMode.FAN_ONLY,
 }
 
 HA_FAN_MODE_TO_DAIKIN = {

@@ -4,6 +4,7 @@ from datetime import timedelta
 import logging
 
 from pymadoka import Controller, discover_devices, force_device_disconnect
+from pymadoka import ConnectionException
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -17,12 +18,13 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.core import HomeAssistant
 
 from . import config_flow  # noqa: F401
-from .const import CONTROLLERS, DOMAIN
+from .const import CONTROLLERS, DOMAIN, VENTILATION_CONTROLLERS
+from .ventilation import Ventilation
 
 PARALLEL_UPDATES = 0
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
 
-COMPONENT_TYPES = ["climate"]
+COMPONENT_TYPES = ["climate", "fan", "select"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,6 +69,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         adapter=entry.data[CONF_DEVICE], timeout=entry.data[CONF_SCAN_INTERVAL]
     )
 
+    ventilation_controllers = set()
+
     for device, controller in controllers.items():
         try:
             await asyncio.wait_for(controller.start(), timeout=10)
@@ -76,9 +80,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 device,
                 str(connection_aborted_error),
             )
+            continue
+
+        # Probe for ventilation support by attempting a ventilation query
+        try:
+            controller.ventilation = Ventilation(controller.connection)
+            await asyncio.wait_for(controller.ventilation.query(), timeout=10)
+            ventilation_controllers.add(device)
+            _LOGGER.info("Device %s detected as ventilation unit", device)
+        except (ConnectionAbortedError, ConnectionException, Exception):
+            # Not a ventilation device - remove the feature so update() skips it
+            if hasattr(controller, "ventilation"):
+                del controller.ventilation
+            _LOGGER.debug("Device %s is not a ventilation unit", device)
 
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {CONTROLLERS: controllers}
+    hass.data[DOMAIN][entry.entry_id] = {
+        CONTROLLERS: controllers,
+        VENTILATION_CONTROLLERS: ventilation_controllers,
+    }
     for component in COMPONENT_TYPES:
         coroutine = hass.config_entries.async_forward_entry_setups(entry, [component])
         hass.async_create_task(coroutine)
