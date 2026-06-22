@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes Telegram Userbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_VPS_USER
+WorkingDirectory=/path/to/daikin_madoka/hermes_telegram
+EnvironmentFile=/path/to/daikin_madoka/hermes_telegram/.env
+ExecStart=/usr/bin/python3 bot.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
