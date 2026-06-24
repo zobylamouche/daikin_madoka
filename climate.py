@@ -201,32 +201,15 @@ class DaikinMadokaClimate(CoordinatorEntity[MadokaCoordinator], ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature.
 
-        The Madoka maintains separate cooling and heating setpoints.
-        This method updates the relevant one based on the current
-        operation mode, and keeps the other in sync.
+        The BRC1H always stores cooling == heating setpoints and silently
+        rejects any SET command where the two differ.  Always send both
+        equal to the requested temperature.
         """
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
             return
         temp = round(temp)
-        cool = (
-            self._state.cooling_setpoint
-            if self._state.cooling_setpoint is not None
-            else temp
-        )
-        heat = (
-            self._state.heating_setpoint
-            if self._state.heating_setpoint is not None
-            else temp
-        )
-        if self._state.operation_mode == OperationMode.HEAT:
-            heat = temp
-        elif self._state.operation_mode == OperationMode.COOL:
-            cool = temp
-        else:
-            cool = temp
-            heat = temp
-        await self.coordinator.async_set_setpoint(cool, heat)
+        await self.coordinator.async_set_setpoint(float(temp), float(temp))
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set the fan speed.

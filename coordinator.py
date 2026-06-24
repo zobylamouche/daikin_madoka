@@ -27,6 +27,7 @@ import asyncio
 import logging
 from datetime import timedelta
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
@@ -39,6 +40,7 @@ from .madoka_protocol import (
     CMD_GET_POWER,
     CMD_GET_MODE,
     CMD_GET_SETPOINT,
+    CMD_SET_SETPOINT,
     CMD_GET_FAN,
     CMD_GET_TEMPERATURES,
     CMD_GET_CLEAN_FILTER,
@@ -81,16 +83,20 @@ _QUERY_PAUSE = 0.5  # Seconds between sequential BLE queries to avoid congestion
 class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
     """Coordinator that polls a Madoka thermostat over BLE."""
 
-    def __init__(self, hass: HomeAssistant, address: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, address: str
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"Madoka {address}",
             update_interval=_UPDATE_INTERVAL,
         )
         self.address = address
         self._client = MadokaBluetoothClient(hass, address)
         self.state = MadokaState()
+        self._setpoint_raw: dict = {}  # cached raw GET_SETPOINT params for SET echo
 
     async def async_start(self) -> None:
         """Start the BLE client and schedule first refresh."""
@@ -109,6 +115,8 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
         others from being updated.  A short pause between queries
         gives the BLE stack time to process each response.
         """
+        ok_count = 0  # queries that actually got an answer this cycle
+        _LOGGER.info("Madoka %s: poll cycle starting", self.address)
         try:
             # 1. Power
             try:
@@ -116,6 +124,7 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                     cmd_get_power(), CMD_GET_POWER
                 )
                 self.state.power_on = decode_power(vals)
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Power read failed: %s", err)
 
@@ -127,6 +136,7 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                     cmd_get_mode(), CMD_GET_MODE
                 )
                 self.state.operation_mode = decode_mode(vals)
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Mode read failed: %s", err)
 
@@ -142,6 +152,8 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                     self.state.cooling_setpoint = cool
                 if heat is not None:
                     self.state.heating_setpoint = heat
+                self._setpoint_raw = vals  # cache limit params for SET command
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Setpoint read failed: %s", err)
 
@@ -157,6 +169,7 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                     self.state.cooling_fan_speed = cool_fan
                 if heat_fan is not None:
                     self.state.heating_fan_speed = heat_fan
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Fan read failed: %s", err)
 
@@ -172,6 +185,7 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                     self.state.indoor_temperature = indoor
                 if outdoor is not None:
                     self.state.outdoor_temperature = outdoor
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Temperature read failed: %s", err)
 
@@ -183,6 +197,7 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                     cmd_get_clean_filter(), CMD_GET_CLEAN_FILTER
                 )
                 self.state.clean_filter_needed = decode_clean_filter(vals)
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Clean filter read failed: %s", err)
 
@@ -212,8 +227,17 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
                 brightness = decode_eye_brightness(vals)
                 if brightness is not None:
                     self.state.eye_brightness = brightness
+                ok_count += 1
             except Exception as err:
                 _LOGGER.debug("Eye brightness read failed: %s", err)
+
+            if ok_count == 0:
+                # Nothing answered at all: device unreachable. Marking
+                # the update as failed makes entities show "unavailable"
+                # instead of silently freezing on stale values.
+                raise UpdateFailed(
+                    f"Madoka {self.address} did not answer any query"
+                )
 
             _LOGGER.debug(
                 "Poll complete: power=%s mode=%s cool=%.0f°C heat=%.0f°C indoor=%s outdoor=%s",
@@ -250,12 +274,40 @@ class MadokaCoordinator(DataUpdateCoordinator[MadokaState]):
     async def async_set_setpoint(
         self, cooling: float, heating: float
     ) -> None:
-        """Set target temperatures."""
-        await self._client.async_send_command(
-            cmd_set_setpoint(cooling, heating)
-        )
-        self.state.cooling_setpoint = cooling
-        self.state.heating_setpoint = heating
+        """Set target temperatures.
+
+        Both cooling and heating must be equal — the BRC1H silently
+        rejects any SET where they differ.  Limits from the last GET
+        are echoed back so the device doesn't reject the command for
+        out-of-range limit params.
+        """
+        try:
+            await self._client.async_query(
+                cmd_set_setpoint(cooling, heating, self._setpoint_raw or None),
+                CMD_SET_SETPOINT,
+                timeout=10.0,
+            )
+        except Exception as err:
+            _LOGGER.warning("SET 0x4040 failed: %s", err)
+
+        # Verify and refresh cache
+        await asyncio.sleep(0.5)
+        try:
+            vals = await self._client.async_query(
+                cmd_get_setpoint(), CMD_GET_SETPOINT
+            )
+            actual_cool, actual_heat = decode_setpoint(vals)
+            _LOGGER.debug(
+                "Setpoint verify: device cool=%s heat=%s (sent cool=%.1f heat=%.1f)",
+                actual_cool, actual_heat, cooling, heating,
+            )
+            self.state.cooling_setpoint = actual_cool if actual_cool is not None else cooling
+            self.state.heating_setpoint = actual_heat if actual_heat is not None else heating
+            self._setpoint_raw = vals
+        except Exception as err:
+            _LOGGER.debug("Verify GET failed: %s", err)
+            self.state.cooling_setpoint = cooling
+            self.state.heating_setpoint = heating
         self.async_set_updated_data(self.state)
 
     async def async_set_fan(

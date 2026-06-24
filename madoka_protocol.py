@@ -242,16 +242,52 @@ def cmd_get_setpoint() -> list[bytes]:
     return build_chunked_command(CMD_GET_SETPOINT)
 
 
-def cmd_set_setpoint(cooling: float, heating: float) -> list[bytes]:
-    """Set target temperatures (GFLOAT: value * 128, 2 bytes big-endian)."""
-    return build_chunked_command(CMD_SET_SETPOINT, {
+def cmd_set_setpoint(
+    cooling: float,
+    heating: float,
+    raw_limits: Optional[Dict[int, bytes]] = None,
+) -> list[bytes]:
+    """Set target temperatures (GFLOAT: value * 128, 2 bytes big-endian).
+
+    raw_limits: cached params from a previous GET_SETPOINT response.
+    The BRC1H validates all limit params before applying setpoints; sending
+    zeros causes the device to silently reject the change.  Pass the last
+    GET response so the real device limits are echoed back in the write.
+    """
+    # Limit param IDs present in the 0x4040 SET command
+    _LIMIT_PARAMS = (0x30, 0x31, 0x32, 0xA0, 0xA1, 0xA2, 0xA3,
+                     0xA4, 0xA5, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5)
+
+    params: Dict[int, bytes] = {
         PARAM_SETPOINT_COOLING: int(cooling * 128).to_bytes(2, "big"),
         PARAM_SETPOINT_HEATING: int(heating * 128).to_bytes(2, "big"),
-        # Required padding params
-        0x30: b"\x00",       # range_enabled
-        0x31: b"\x02",       # mode (always 2)
-        0x32: b"\x00",       # min_differential
-    })
+    }
+
+    if raw_limits:
+        for k in _LIMIT_PARAMS:
+            if k in raw_limits:
+                params[k] = raw_limits[k]
+    else:
+        # Fallback when no cached GET is available (first call after restart)
+        params.update({
+            0x30: b"\x00",
+            0x31: b"\x01",    # mode=1 as reported by device
+            0x32: b"\x00",
+            0xA0: b"\x10",    # 16
+            0xA1: b"\x10",
+            0xA2: b"\x09\x00",  # 18°C lower limit
+            0xA3: b"\x09\x00",
+            0xA4: b"\x16",
+            0xA5: b"\x16",
+            0xB0: b"\x20",    # 32
+            0xB1: b"\x20",
+            0xB2: b"\x0D\x80",  # 27°C upper limit
+            0xB3: b"\x0D\x80",
+            0xB4: b"\x1C",
+            0xB5: b"\x1C",
+        })
+
+    return build_chunked_command(CMD_SET_SETPOINT, params)
 
 
 def cmd_get_fan() -> list[bytes]:
